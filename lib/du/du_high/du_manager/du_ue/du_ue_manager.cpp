@@ -204,6 +204,16 @@ const du_ue* du_ue_manager::find_ue(du_ue_index_t ue_index) const
   return ue_db.contains(ue_index) ? &ue_db[ue_index] : nullptr;
 }
 
+std::vector<du_ue*> du_ue_manager::find_ues(const std::function<bool(const du_ue*)>& predicate) {
+  std::vector<du_ue*> ues;
+  for (auto& ue : ue_db) {
+    if (predicate(&ue)) {
+      ues.push_back(&ue);
+    }
+  }
+  return ues;
+}
+
 du_ue* du_ue_manager::find_rnti(rnti_t rnti)
 {
   auto it = rnti_to_ue_index.find(rnti);
@@ -214,7 +224,8 @@ du_ue* du_ue_manager::find_rnti(rnti_t rnti)
 du_ue* du_ue_manager::find_f1ap_ue_id(gnb_du_ue_f1ap_id_t f1ap_ue_id)
 {
   for (auto& ue : ue_db) {
-    if (ue.f1ap_ue_id == f1ap_ue_id) {
+    // if (ue.f1ap_ue_id == f1ap_ue_id) {
+    if ((srsran::gnb_du_ue_f1ap_id_t)ue.rnti == f1ap_ue_id) {
       return &ue;
     }
   }

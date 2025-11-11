@@ -48,6 +48,7 @@ private:
   // Task run from within the UE task loop.
   async_task<mac_ue_reconfiguration_response> handle_mac_config();
 
+  srslog::basic_logger& logger;
   const du_mac_sched_control_config request;
   du_ue_manager_repository&         ue_mng;
   const du_manager_params&          du_params;

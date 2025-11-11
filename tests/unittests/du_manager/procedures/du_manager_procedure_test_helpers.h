@@ -86,6 +86,10 @@ public:
   {
     return ues.contains(ue_index) ? &ues[ue_index] : nullptr;
   }
+  std::vector<du_ue*> find_ues(const std::function<bool(const du_ue*)>& predicate) override
+  {
+    return {};
+  }
   du_ue* find_rnti(rnti_t rnti) override
   {
     for (auto& u : ues) {

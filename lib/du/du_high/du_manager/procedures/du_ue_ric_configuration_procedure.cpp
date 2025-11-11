@@ -29,7 +29,7 @@ using namespace srs_du;
 du_ue_ric_configuration_procedure::du_ue_ric_configuration_procedure(const du_mac_sched_control_config& request_,
                                                                      du_ue_manager_repository&          ue_mng_,
                                                                      const du_manager_params&           du_params_) :
-  request(request_), ue_mng(ue_mng_), du_params(du_params_)
+  logger(srslog::fetch_basic_logger("DU-UE-RIC")), request(request_), ue_mng(ue_mng_), du_params(du_params_)
 {
 }
 
@@ -50,27 +50,84 @@ void du_ue_ric_configuration_procedure::operator()(coro_context<async_task<du_ma
 
 manual_event<du_mac_sched_control_config_response>& du_ue_ric_configuration_procedure::dispatch_ue_config_task()
 {
-  // Find UE context based on F1AP UE ID.
-  ue = ue_mng.find_f1ap_ue_id(static_cast<gnb_du_ue_f1ap_id_t>(request.ue_id));
-  if (ue == nullptr) {
-    du_mac_sched_control_config_response fail{false, false, false};
-    ue_config_completed.set(fail);
-    return ue_config_completed;
+  // Gereric lambda function to dispatch UE configuration
+  const auto ue_config_distacher = [this]() {
+    // Dispatch UE configuration to UE task loop inside the UE manager.
+    ue_mng.schedule_async_task(
+        ue->ue_index, launch_async([this](coro_context<async_task<void>>& ctx) {
+          CORO_BEGIN(ctx);
+
+          // Await for UE configuration completion.
+          CORO_AWAIT_VALUE(const mac_ue_reconfiguration_response result, handle_mac_config());
+
+          // Signal completion of UE configuration to external coroutine.
+          ue_config_completed.set(du_mac_sched_control_config_response{result.result, result.result, result.result});
+
+          CORO_RETURN();
+        }));
+  };
+
+  // When there is no ue_id in the request, we assume that the request is for slice configuration for all UEs in that slice.
+  if (not request.ue_id) {
+    // TODO Huff iterate over all parameters
+    s_nssai_t requested_nssai = request.param_list[0].rrm_policy_group->pol_member.s_nssai;
+    const auto filter = [requested_nssai](const du_ue* test_ue) {
+      if (test_ue->bearers.drbs().empty()) {
+        return false;
+      }
+
+      s_nssai_t ue_nssai = test_ue->resources->drbs.begin()->s_nssai;
+
+      if (requested_nssai == ue_nssai) {
+        return true;
+      }
+      return false;
+    };
+    // TODO Huff iterate over all parameters
+    plmn_identity plmnid = request.param_list[0].rrm_policy_group->pol_member.plmn_id;
+
+    std::vector<du_ue *> ues = ue_mng.find_ues(filter);
+
+    logger.debug("{} UEs were found for mcc={} mnc={} sst={} and sd={}",
+        ues.size(),
+        plmnid.mcc().to_string(),
+        plmnid.mnc().to_string(),
+        requested_nssai.sst.value(),
+        requested_nssai.sd.value());
+
+    if (not ues.empty()) {
+      for (auto& test_ue : ues) {
+        ue = test_ue;
+        ue_config_distacher();
+
+        logger.info("UE reconfiguration completed for rnti={} sst={} and sd={}, with min_prb={} and max_prb={}",
+            test_ue->rnti,
+            requested_nssai.sst.value(),
+            requested_nssai.sd.value(),
+            request.param_list[0].rrm_policy_group->min_prb_policy_ratio,
+            request.param_list[0].rrm_policy_group->max_prb_policy_ratio);
+      }
+    }
+
+  } else {  // We assume the configuration is for a single UE
+
+    // Find UE context based on F1AP UE ID.
+    ue = ue_mng.find_f1ap_ue_id(static_cast<gnb_du_ue_f1ap_id_t>(request.ue_id));
+    if (ue == nullptr) {
+      du_mac_sched_control_config_response fail{false, false, false};
+      ue_config_completed.set(fail);
+      // return ue_config_completed;
+    } else {
+      ue_config_distacher();
+    }
+
+    logger.info("UE reconfiguration completed for rnti={} sst={} and sd={}, with min_prb={} and max_prb={}",
+        ue->rnti,
+        request.param_list[0].rrm_policy_group->pol_member.s_nssai.sst.value(),
+        request.param_list[0].rrm_policy_group->pol_member.s_nssai.sd.value(),
+        request.param_list[0].rrm_policy_group->min_prb_policy_ratio,
+        request.param_list[0].rrm_policy_group->max_prb_policy_ratio);
   }
-
-  // Dispatch UE configuration to UE task loop inside the UE manager.
-  ue_mng.schedule_async_task(
-      ue->ue_index, launch_async([this](coro_context<async_task<void>>& ctx) {
-        CORO_BEGIN(ctx);
-
-        // Await for UE configuration completion.
-        CORO_AWAIT_VALUE(const mac_ue_reconfiguration_response result, handle_mac_config());
-
-        // Signal completion of UE configuration to external coroutine.
-        ue_config_completed.set(du_mac_sched_control_config_response{result.result, result.result, result.result});
-
-        CORO_RETURN();
-      }));
 
   return ue_config_completed;
 }

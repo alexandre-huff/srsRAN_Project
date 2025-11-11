@@ -74,6 +74,9 @@ public:
   const du_ue* find_ue(du_ue_index_t ue_index) const override;
   du_ue*       find_ue(du_ue_index_t ue_index) override;
 
+/// \brief Find all UEs from a given predicate function.
+std::vector<du_ue*> find_ues(const std::function<bool(const du_ue*)>& predicate) override;
+
   /// \brief Number of DU UEs currently active.
   size_t nof_ues() const { return ue_db.size(); }
 
